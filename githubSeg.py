@@ -1,8 +1,9 @@
-__author__ = 'tania'
+__author__ = 'Tania Reyes - reyes.mtz.tania@gmail.com'
 
 import math
 import numpy as np
 import cv2
+import sys
 
 
 def get_hue(a, b):
@@ -16,6 +17,9 @@ def get_hue(a, b):
 
 def CIE2000_distance(lab1, lab2):
     # formula from: http://www.ece.rochester.edu/~gsharma/papers/CIEDE2000CRNAFeb05.pdf
+
+    lab1 = [lab1[0] / 255 * 100.0, lab1[1] - 128, lab1[2] - 128]
+    lab2 = [lab2[0] / 255 * 100.0, lab2[1] - 128, lab2[2] - 128]
 
     c1 = math.sqrt(lab1[1] ** 2 + lab1[2] ** 2)
     c2 = math.sqrt(lab2[1] ** 2 + lab2[2] ** 2)
@@ -82,7 +86,11 @@ def CIE2000_distance(lab1, lab2):
 
 
 def LAB_shadow(LAB_color_1, LAB_color_2):
-    threshold_L = 30
+
+    #when a color is darker the values in A and B remains almost the same
+    #but the value in Lightness changes more
+
+    threshold_L = 70
     threshold_A = 15
     threshold_B = 20
 
@@ -98,240 +106,176 @@ def LAB_shadow(LAB_color_1, LAB_color_2):
     return False
 
 
-def RGB_2_XYZ(rgb_color):
-    var_R = rgb_color[0] / 255.0
-    var_G = rgb_color[1] / 255.0
-    var_B = rgb_color[2] / 255.0
-
-    if var_R > 0.04045:
-        var_R = ((var_R + 0.055) / 1.055) ** 2.4
-    else:
-        var_R /= 12.92
-
-    if var_G > 0.04045:
-        var_G = ((var_G + 0.055) / 1.055) ** 2.4
-    else:
-        var_G /= 12.92
-
-    if var_B > 0.04045:
-        var_B = ((var_B + 0.055) / 1.055) ** 2.4
-    else:
-        var_B /= 12.92
-
-    var_R *= 100
-    var_G *= 100
-    var_B *= 100
-
-    X = var_R * 0.4124 + var_G * 0.3576 + var_B * 0.1805
-    Y = var_R * 0.2126 + var_G * 0.7152 + var_B * 0.0722
-    Z = var_R * 0.0193 + var_G * 0.1192 + var_B * 0.9505
-
-    return [X, Y, Z]
-
-
-def XYZ_2_lab(XYZ_color):
-    var_X = float(XYZ_color[0]) / 94.8
-    var_Y = float(XYZ_color[1]) / 100.0
-    var_Z = float(XYZ_color[2]) / 107.3
-
-    if var_X > 0.008856:
-        var_X **= 1.0 / 3.0
-    else:
-        var_X = (7.787 * var_X) + (16.0 / 116.0)
-
-    if var_Y > 0.008856:
-        var_Y **= 1.0 / 3.0
-    else:
-        var_Y = (7.787 * var_Y) + (16.0 / 116.0)
-    if var_Z > 0.008856:
-        var_Z **= 1.0 / 3.0
-    else:
-        var_Z = (7.787 * var_Z) + (16.0 / 116.0)
-
-    L = (116 * var_Y) - 16
-    a = 500 * (var_X - var_Y)
-    b = 200 * (var_Y - var_Z)
-    L = round(L, 2)
-    a = round(a, 2)
-    b = round(b, 2)
-
-    return [L, a, b]
-
-
-def RGB_2_LAB(arrBGR):
-    arr_Lab = []
-    for row in arrBGR:
-        temp_row = []
-        for column in row:
-            XYZ = RGB_2_XYZ([column[2], column[1], column[0]])
-            lab = XYZ_2_lab(XYZ)
-
-            temp_row.append(lab)
-        arr_Lab.append(temp_row)
-    return arr_Lab
-
-
 def cloth_color(image_path, expected_size=40, in_clusters=7, out_clusters=3, final_size=300):
+
     initial_image = cv2.imread(image_path)
-    height, width = initial_image.shape[:2]
 
-    factor = math.sqrt(width * height / (expected_size * expected_size))
+    if initial_image is not None:
+        height, width = initial_image.shape[:2]
 
-    image = cv2.resize(initial_image,
-                       (int(width / factor), int(height / factor)),
-                       interpolation=cv2.INTER_LINEAR)
-    LAB_image = np.array(RGB_2_LAB(image))
-    frame_width = int(expected_size / 10 + 2)
-    in_samples = []
+        factor = math.sqrt(width * height / (expected_size * expected_size))
 
-    border_samples = []
+        #image downsample
+        image = cv2.resize(initial_image,
+                           (int(width / factor), int(height / factor)),
+                           interpolation=cv2.INTER_LINEAR)
 
-    limit_Y = LAB_image.shape[0] - frame_width
-    limit_X = LAB_image.shape[1] - frame_width
+        LAB_image = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+        frame_width = int(expected_size / 10 + 2)
+        in_samples = []
 
-    for y in range(LAB_image.shape[0] - 1):
-        for x in range(LAB_image.shape[1] - 1):
-            pt = LAB_image[y][x]
-            if x < frame_width or y < frame_width or y >= limit_Y or x >= limit_X:
-                border_samples.append(pt)
-            else:
-                in_samples.append(pt)
+        border_samples = []
 
-    in_samples = np.array(in_samples, dtype=float)
-    border_samples = np.array(border_samples, dtype=float)
+        limit_Y = LAB_image.shape[0] - frame_width
+        limit_X = LAB_image.shape[1] - frame_width
 
-    em_in = cv2.ml.EM_create()
-    em_in.setClustersNumber(in_clusters)
-    in_etval, in_likelihoods, in_labels, in_probs = em_in.trainEM(in_samples)
+        for y in range(LAB_image.shape[0] - 1):
+            for x in range(LAB_image.shape[1] - 1):
+                pt = LAB_image[y][x]
+                if x < frame_width or y < frame_width or y >= limit_Y or x >= limit_X:
+                    border_samples.append(pt)
+                else:
+                    in_samples.append(pt)
 
-    in_means = em_in.getMeans()
-    in_covs = em_in.getCovs()
+        in_samples = np.array(in_samples, dtype=float)
+        border_samples = np.array(border_samples, dtype=float)
 
-    em_border = cv2.ml.EM_create()
-    em_border.setClustersNumber(out_clusters)
-    border_etval, border_likelihoods, border_labels, border_probs = em_border.trainEM(border_samples)
+        em_in = cv2.ml.EM_create()
+        em_in.setClustersNumber(in_clusters)
+        in_etval, in_likelihoods, in_labels, in_probs = em_in.trainEM(in_samples)
 
-    border_means = em_border.getMeans()
+        in_means = em_in.getMeans()
+        in_covs = em_in.getCovs()
 
-    unique_border, counts_border = np.unique(border_labels, return_counts=True)
-    count_border_labels = dict(zip(unique_border, counts_border))
+        em_border = cv2.ml.EM_create()
+        em_border.setClustersNumber(out_clusters)
+        border_etval, border_likelihoods, border_labels, border_probs = em_border.trainEM(border_samples)
 
-    unique, counts = np.unique(in_labels, return_counts=True)
+        border_means = em_border.getMeans()
 
-    count_in_labels = dict(zip(unique, counts))
-    in_len = len(in_covs)
+        unique_border, counts_border = np.unique(border_labels, return_counts=True)
+        count_border_labels = dict(zip(unique_border, counts_border))
 
-    valid = [True] * in_len
+        unique, counts = np.unique(in_labels, return_counts=True)
 
-    # colors vs background
-    for i in range(in_len):
-        if not valid[i]:
-            continue
+        count_in_labels = dict(zip(unique, counts))
+        in_len = len(in_covs)
 
-        prop_in = float(count_in_labels[i]) / len(in_labels)
-        if prop_in < 0.05:
-            valid[i] = False
-            continue
+        valid = [True] * in_len
 
-        # remove similar colors
-        for key in count_border_labels:
-            prop_border = float(count_border_labels[key]) / len(border_labels)
-
-            if prop_in > prop_border:
+        # colors vs background
+        for i in range(in_len):
+            if not valid[i]:
                 continue
 
-            cie_dst = CIE2000_distance(in_means[i], border_means[key])
+            prop_in = float(count_in_labels[i]) / len(in_labels)
 
-            if cie_dst < 5:
+            #if the proportion is too small can be only buttons or labels
+            if prop_in < 0.05:
                 valid[i] = False
-
-    # colors vs colors
-    for i in range(in_len):
-        if not valid[i]:
-            continue
-
-        for j in range(i + 1, in_len):
-            if not valid[j]:
                 continue
 
-            is_shadow = LAB_shadow(in_means[i], in_means[j])
+            # remove similar colors
+            for key in count_border_labels:
+                prop_border = float(count_border_labels[key]) / len(border_labels)
 
-            if is_shadow:
-                if count_in_labels[j] > count_in_labels[i]:
+                #if the color appears more in the center, it belongs to the cloth
+                #else is background
+                if prop_in > prop_border:
+                    continue
+
+                cie_dst = CIE2000_distance(in_means[i], border_means[key])
+
+                if cie_dst < 5:
                     valid[i] = False
 
-                    count_in_labels[j] += count_in_labels[i]
-                    break
-                else:
-                    valid[j] = False
-
-                    count_in_labels[i] += count_in_labels[j]
-
-    num_valid = sum(True == x for x in valid)
-
-    colors = []
-    proportions = []
-    total_color = 0
-
-    if num_valid == 0:
-        pos = 0
-        max_count = 0
+        # colors vs colors
         for i in range(in_len):
-            if count_in_labels[i] >= max_count:
-                max_count = count_in_labels[i]
-                pos = i
+            if not valid[i]:
+                continue
 
-        colors = [in_means[pos]]
-        proportions = [count_in_labels[pos]]
-        total_color = count_in_labels[pos]
+            for j in range(i + 1, in_len):
+                if not valid[j]:
+                    continue
 
-    for i in range(in_len):
+                #removes shadows and similar colors
+                cie_dst = CIE2000_distance(in_means[i], in_means[j])
 
-        if not valid[i]:
-            continue
+                is_shadow = LAB_shadow(in_means[i], in_means[j])
 
-        color = in_means[i]
-        quantity = count_in_labels[i]
-        colors.append(color)
-        proportions.append(quantity)
-        total_color += quantity
+                if is_shadow or cie_dst < 20:
+                    if count_in_labels[j] > count_in_labels[i]:
+                        valid[i] = False
 
-    factor = max(1,math.sqrt(width * height / (final_size * final_size)))
+                        count_in_labels[j] += count_in_labels[i]
+                        break
+                    else:
+                        valid[j] = False
+                        count_in_labels[i] += count_in_labels[j]
 
-    final_image = cv2.resize(initial_image,
-                             (int(width / factor),
-                              int(height / factor)),
-                             interpolation=cv2.INTER_LINEAR)
-    final_height, final_width = final_image.shape[:2]
+        num_valid = sum(True == x for x in valid)
 
-    colors_width = int(final_width / 6.0)
+        colors = []
+        proportions = []
+        total_color = 0
 
-    image_with_border = cv2.copyMakeBorder(final_image,
-                                           top=0,
-                                           bottom=0,
-                                           left=0,
-                                           right=colors_width,
-                                           borderType=cv2.BORDER_CONSTANT,
-                                           value=[0.0, 0.0, 0.0])
+        #if the cloth is of the same color that the background, takes the more common color
+        if num_valid == 0:
+            pos = max(count_in_labels, key=count_in_labels.get)
+            colors = [in_means[pos]]
+            proportions = [count_in_labels[pos]]
+            total_color = count_in_labels[pos]
 
-    y_color = 0
+        for i in range(in_len):
 
-    for i, color_LAB in enumerate(colors):
-        color_LAB = np.array([[[color_LAB[0] * 255 / 100.0, color_LAB[1] + 128, color_LAB[2] + 128]]])
-        color_LAB = color_LAB.astype(np.uint8)
-        color = cv2.cvtColor(color_LAB, cv2.COLOR_Lab2BGR)[0][0]
-        color = color.tolist()
-        height_color = int(math.ceil(proportions[i]*final_height/float(total_color)))
+            if not valid[i]:
+                continue
 
-        cv2.rectangle(image_with_border,
-                      (final_width, y_color),
-                      (final_width + colors_width, y_color + height_color),
-                      color,
-                      -1)
-        y_color += height_color
-    cv2.imshow("colors", image_with_border)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+            color = in_means[i]
+            quantity = count_in_labels[i]
+            colors.append(color)
+            proportions.append(quantity)
+            total_color += quantity
 
+        factor = max(1,math.sqrt(width * height / (final_size * final_size)))
 
-principal_colors = cloth_color("imagenes/azul.jpg")
+        final_image = cv2.resize(initial_image,
+                                 (int(width / factor),
+                                  int(height / factor)),
+                                 interpolation=cv2.INTER_LINEAR)
+        final_height, final_width = final_image.shape[:2]
+
+        colors_width = int(final_width / 6.0)
+
+        image_with_border = cv2.copyMakeBorder(final_image,
+                                               top=0,
+                                               bottom=0,
+                                               left=0,
+                                               right=colors_width,
+                                               borderType=cv2.BORDER_CONSTANT,
+                                               value=[0.0, 0.0, 0.0])
+
+        y_color = 0
+
+        for i, color_LAB in enumerate(colors):
+            color_LAB = np.array([[[color_LAB[0], color_LAB[1], color_LAB[2]]]])
+            color_LAB = color_LAB.astype(np.uint8)
+            color = cv2.cvtColor(color_LAB, cv2.COLOR_Lab2BGR)[0][0]
+            color = color.tolist()
+            height_color = int(math.ceil(proportions[i]*final_height/float(total_color)))
+
+            cv2.rectangle(image_with_border,
+                          (final_width, y_color),
+                          (final_width + colors_width, y_color + height_color),
+                          color,
+                          -1)
+            y_color += height_color
+        cv2.imshow("colors", image_with_border)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+    else:
+        print("Image not found")
+
+if __name__ == "__main__":
+    cloth_color(sys.argv[1:][0])
+
