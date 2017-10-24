@@ -1,5 +1,5 @@
 # color_cloth
-color_cloth gets the main colors and its proportions from a cloth image, it assumes that the item is in the center of the image.
+color_cloth gets the main colors and its proportions from a cloth image using the EM algorithm from OpenCV library, it assumes that the item is in the center of the image.
 
 ## Prerequisites
 - **numpy:** `pip install numpy`
